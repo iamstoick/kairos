@@ -97,7 +97,7 @@ func UpdateTimeEverySecond(g *gocui.Gui) {
 // layout configures the layout of the GUI views within the application window.
 // It sets up a top view for displaying time in UTC and three bottom views for
 // different time zones using ASCII art for time display.
-/*func layout(g *gocui.Gui) error {
+func layout(g *gocui.Gui) error {
 	// Obtain the maximum horizontal dimension of the GUI.
 	maxX, _ := g.Size()
 
@@ -124,37 +124,6 @@ func UpdateTimeEverySecond(g *gocui.Gui) {
 	SetupBottomView(g, "bottom_right", 2*maxX/3, topHeight+1, maxX-1, bottomHeight, " Asia/Manila ", locations["Philippine Time"])
 
 	// Return nil to indicate successful layout setup.
-	return nil
-}*/
-func layout(g *gocui.Gui) error {
-	maxX, _ := g.Size()
-	topHeight := 10
-	bottomHeight := topHeight * 2
-
-	// Set the top view
-	topView, err := g.SetView("top", 0, 0, maxX-1, topHeight-1)
-	if err != nil && err != gocui.ErrUnknownView {
-		return err
-	}
-	topView.Title = " " + timezones[0].name + " "
-	UpdateViewTime(topView, locations[timezones[0].name])
-
-	// Calculate the width of each bottom view based on the number of timezones minus the top view
-	bottomViewWidth := maxX / (len(timezones) - 1)
-
-	// Set bottom views.
-	for i := 1; i < len(timezones); i++ {
-		x0 := (i - 1) * bottomViewWidth
-		x1 := x0 + bottomViewWidth - 1
-		viewName := fmt.Sprintf("bottom%d", i)
-		bottomView, err := g.SetView(viewName, x0, topHeight, x1, bottomHeight)
-		if err != nil && err != gocui.ErrUnknownView {
-			return err
-		}
-		bottomView.Title = " " + timezones[i].name + " "
-		UpdateViewTime(bottomView, locations[timezones[i].name])
-	}
-
 	return nil
 }
 
@@ -265,92 +234,29 @@ func KeyBindings(g *gocui.Gui) error {
 		return err
 	}
 
-	// Bind Ctrl+A to swapTimezones function.
-	errSwapToptoBottomLeft := g.SetKeybinding("", gocui.KeyCtrlA, gocui.ModNone, SwapToptoBottomLeft)
-	if errSwapToptoBottomLeft != nil {
-		return errSwapToptoBottomLeft
-	}
-
-	// Bind Ctrl+S to swapTimezones function.
-	errSwapToptoBottomMiddle := g.SetKeybinding("", gocui.KeyCtrlS, gocui.ModNone, SwapToptoBottomMiddle)
-	if errSwapToptoBottomMiddle != nil {
-		return errSwapToptoBottomMiddle
-	}
-
-	// Bind Ctrl+D to swapTimezones function.
-	errSwapToptoBottomRight := g.SetKeybinding("", gocui.KeyCtrlD, gocui.ModNone, SwapToptoBottomRight)
-	if errSwapToptoBottomRight != nil {
-		return errSwapToptoBottomRight
+	// Bind Ctrl+S to swapTimezones function
+	err := g.SetKeybinding("", gocui.KeyCtrlD, gocui.ModNone, SwapTimezones)
+	if err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func SwapToptoBottomRight(g *gocui.Gui, v *gocui.View) error {
+func SwapTimezones(g *gocui.Gui, v *gocui.View) error {
+	// Log before swap
+	fmt.Println("Before swap:", timezones[0].name, timezones[3].name)
 	// Swap UTC and Philippine Time in the `timezones` slice
 	// Assuming they are at specific indices, you might need to adjust these based on your slice setup
 	// Assuming UTC is index 0 and Philippine Time is index 3
+
 	// Swap the timezones. This is a more generic approach that works for any slice length.
 	timezones[0], timezones[3] = timezones[3], timezones[0]
+	// Log after swap
+	fmt.Println("After swap:", timezones[0].name, timezones[3].name)
 
 	g.Update(func(gui *gocui.Gui) error {
-		// Directly handle the error inside this function.
-		err := layout(gui)
-		if err != nil {
-			log.Println("Error updating GUI:", err)
-		}
-		return nil
-	})
-
-	return nil
-}
-
-func SwapToptoBottomLeft(g *gocui.Gui, v *gocui.View) error {
-	// Swap UTC and PST in the `timezones` slice
-	// Assuming they are at specific indices, you might need to adjust these based on your slice setup
-	// Assuming UTC is index 0 and PST is index 1
-	// Swap the timezones. This is a more generic approach that works for any slice length.
-	timezones[0], timezones[1] = timezones[1], timezones[0]
-
-	g.Update(func(gui *gocui.Gui) error {
-		// Directly handle the error inside this function.
-		err := layout(gui)
-		if err != nil {
-			log.Println("Error updating GUI:", err)
-		}
-		return nil
-	})
-
-	return nil
-}
-
-func SwapToptoBottomMiddle(g *gocui.Gui, v *gocui.View) error {
-	// Swap UTC and PST in the `timezones` slice
-	// Assuming they are at specific indices, you might need to adjust these based on your slice setup
-	// Assuming UTC is index 0 and PST is index 1
-	// Swap the timezones. This is a more generic approach that works for any slice length.
-	timezones[0], timezones[2] = timezones[2], timezones[0]
-
-	g.Update(func(gui *gocui.Gui) error {
-		// Directly handle the error inside this function.
-		err := layout(gui)
-		if err != nil {
-			log.Println("Error updating GUI:", err)
-		}
-		return nil
-	})
-
-	return nil
-}
-
-func SwapUTCtoPST(g *gocui.Gui, v *gocui.View) error {
-	// Swap UTC and PST in the `timezones` slice
-	// Assuming they are at specific indices, you might need to adjust these based on your slice setup
-	// Assuming UTC is index 0 and PST is index 1
-	// Swap the timezones. This is a more generic approach that works for any slice length.
-	timezones[0], timezones[1] = timezones[1], timezones[0]
-
-	g.Update(func(gui *gocui.Gui) error {
+		fmt.Println("SwapTimezones triggered")
 		// Directly handle the error inside this function.
 		err := layout(gui)
 		if err != nil {
