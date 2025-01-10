@@ -1,0 +1,61 @@
+# Version for this file.
+version: 1
+
+# (Optional) List of env variables used during compilation.
+env:
+  - GO111MODULE=on
+  - CGO_ENABLED=0
+
+# (Optional) Flags for the compiler.
+flags:
+  - -trimpath
+  - -tags=netgo
+
+# The OS to compile for. `GOOS` env variable will be set to this value.
+goos:
+  - windows
+  - linux
+  - darwin
+
+# The architecture to compile for. `GOARCH` env variable will be set to this value.
+goarch:
+  - amd64
+  - arm64
+  - s390x
+
+# (Optional) Entrypoint to compile.
+# main: ./path/to/main.go
+
+# (Optional) Working directory. (default: root of the project)
+# dir: ./relative/path/to/dir
+
+# Binary output name.
+# {{ .Os }} will be replaced by goos field in the config file.
+# {{ .Arch }} will be replaced by goarch field in the config file.
+binary: binary-{{ .Os }}-{{ .Arch }}
+
+# (Optional) ldflags generated dynamically in the workflow, and set as the `evaluated-envs` input variables in the workflow.
+ldflags:
+  - "-X main.Version={{ .Env.VERSION }}"
+  - "-X main.Commit={{ .Env.COMMIT }}"
+  - "-X main.CommitDate={{ .Env.COMMIT_DATE }}"
+  - "-X main.TreeState={{ .Env.TREE_STATE }}"
+build:
+  permissions:
+    id-token: write # To sign the provenance.
+    contents: write # To upload assets to release.
+    actions: read # To read the workflow path.
+  strategy:
+    matrix:
+      os:
+        - linux
+        - windows
+        - darwin
+      arch:
+        - amd64
+        - arm64
+  uses: slsa-framework/slsa-github-generator/.github/workflows/builder_go_slsa3.yml@v2.0.0
+  with:
+    go-version: 1.19
+    config-file: .slsa-goreleaser/${{matrix.os}}-${{matrix.arch}}.yml
+    # ... your other stuff here.
