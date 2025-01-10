@@ -1,3 +1,6 @@
+// Author Name: Gerald Z. Villorente
+// Author email: geraldvillorente@gmail.com
+// @2025
 package main
 
 import (
