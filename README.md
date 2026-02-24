@@ -23,8 +23,8 @@ Ensure you have Go installed on your machine.
 
 1. Clone the repository:
 ```
-git clone https://github.com/your-username/cli-clock.git
-cd cli-clock
+git clone git@github.com:iamstoick/kairos.git
+cd kairos
 ```
 2. Install dependencies:
 ```
