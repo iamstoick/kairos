@@ -1,3 +1,5 @@
+<img width="1619" height="757" alt="image" src="https://github.com/user-attachments/assets/a9c8fef9-5287-433e-bcb5-02472cb667fe" />
+
 # 🕒 Kairos - CLI Multi-Timezone Clock
 
 A highly customizable, interactive Command Line Interface (CLI) clock built in Go. It features a 1-3-3 grid layout that displays a primary focus timezone and six secondary timezones with real-time ASCII art rendering.
