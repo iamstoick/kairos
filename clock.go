@@ -38,10 +38,13 @@ var (
 		name     string
 		location string
 	}{
-		{"UTC", "UTC"},
-		{"PST/DST", "America/Los_Angeles"},
-		{"EST", "America/New_York"},
-		{"Philippine Time", "Asia/Manila"},
+		{"UTC", "UTC"},                     // Index 0 (Top)
+		{"PST/DST", "America/Los_Angeles"}, // Index 1
+		{"GMT", "Etc/GMT"},                 // Index 2
+		{"Philippine Time", "Asia/Manila"}, // Index 3
+		{"CST", "America/Chicago"},         // Index 4
+		{"MST", "America/Denver"},          // Index 5
+		{"EST", "America/New_York"},        // Index 6
 	}
 )
 
@@ -129,33 +132,91 @@ func UpdateTimeEverySecond(g *gocui.Gui) {
 	// Return nil to indicate successful layout setup.
 	return nil
 }*/
-func layout(g *gocui.Gui) error {
-	maxX, _ := g.Size()
-	topHeight := 10
-	bottomHeight := topHeight * 2
 
-	// Set the top view
-	topView, err := g.SetView("top", 0, 0, maxX-1, topHeight-1)
-	if err != nil && err != gocui.ErrUnknownView {
-		return err
-	}
-	topView.Title = " " + timezones[0].name + " "
-	UpdateViewTime(topView, locations[timezones[0].name])
+/*
+Layout until February 2026
 
-	// Calculate the width of each bottom view based on the number of timezones minus the top view
-	bottomViewWidth := maxX / (len(timezones) - 1)
+	func layout(g *gocui.Gui) error {
+		maxX, _ := g.Size()
+		topHeight := 10
+		bottomHeight := topHeight * 2
 
-	// Set bottom views.
-	for i := 1; i < len(timezones); i++ {
-		x0 := (i - 1) * bottomViewWidth
-		x1 := x0 + bottomViewWidth - 1
-		viewName := fmt.Sprintf("bottom%d", i)
-		bottomView, err := g.SetView(viewName, x0, topHeight, x1, bottomHeight)
+		// Set the top view
+		topView, err := g.SetView("top", 0, 0, maxX-1, topHeight-1)
 		if err != nil && err != gocui.ErrUnknownView {
 			return err
 		}
-		bottomView.Title = " " + timezones[i].name + " "
-		UpdateViewTime(bottomView, locations[timezones[i].name])
+		topView.Title = " " + timezones[0].name + " "
+		UpdateViewTime(topView, locations[timezones[0].name])
+
+		// Calculate the width of each bottom view based on the number of timezones minus the top view
+		bottomViewWidth := maxX / (len(timezones) - 1)
+
+		// Set bottom views.
+		for i := 1; i < len(timezones); i++ {
+			x0 := (i - 1) * bottomViewWidth
+			x1 := x0 + bottomViewWidth - 1
+			viewName := fmt.Sprintf("bottom%d", i)
+			bottomView, err := g.SetView(viewName, x0, topHeight, x1, bottomHeight)
+			if err != nil && err != gocui.ErrUnknownView {
+				return err
+			}
+			bottomView.Title = " " + timezones[i].name + " "
+			UpdateViewTime(bottomView, locations[timezones[i].name])
+		}
+
+		return nil
+	}
+*/
+func layout(g *gocui.Gui) error {
+	maxX, maxY := g.Size()
+
+	// Reserve the last line for the help footer
+	gridMaxY := maxY - 2
+	rowHeight := gridMaxY / 3
+
+	// Top View (Index 0)
+	if v, err := g.SetView("top", 0, 0, maxX-1, rowHeight-1); err != nil && err != gocui.ErrUnknownView {
+		return err
+	} else {
+		v.Title = " " + timezones[0].name + " "
+		UpdateViewTime(v, locations[timezones[0].name])
+	}
+
+	// Bottom Grid (Indices 1-6)
+	itemsPerRow := 3
+	columnWidth := maxX / itemsPerRow
+	for i := 1; i < len(timezones); i++ {
+		rowNum := (i - 1) / itemsPerRow
+		colNum := (i - 1) % itemsPerRow
+
+		x0 := colNum * columnWidth
+		x1 := x0 + columnWidth - 1
+		if colNum == itemsPerRow-1 {
+			x1 = maxX - 1
+		}
+
+		y0 := (rowNum + 1) * rowHeight
+		y1 := y0 + rowHeight - 1
+
+		viewName := fmt.Sprintf("bottom%d", i)
+		if v, err := g.SetView(viewName, x0, y0, x1, y1); err != nil && err != gocui.ErrUnknownView {
+			return err
+		} else {
+			v.Title = fmt.Sprintf(" [%d] %s ", i, timezones[i].name) // Show key in title
+			UpdateViewTime(v, locations[timezones[i].name])
+		}
+	}
+
+	// 3. Help Footer View
+	if v, err := g.SetView("help", 0, maxY-2, maxX-1, maxY-1); err != nil {
+		if err != gocui.ErrUnknownView {
+			return err
+		}
+		v.Frame = false
+		v.BgColor = gocui.ColorDefault
+		v.FgColor = gocui.ColorCyan
+		fmt.Fprintln(v, CenterDate("Keys [1-6]: Swap with Top | Ctrl+C: Quit", maxX))
 	}
 
 	return nil
@@ -200,7 +261,14 @@ func UpdateViewTime(v *gocui.View, loc *time.Location) {
 	// Move the cursor to the start position considering the padding.
 	v.SetCursor(leftPadding, topPadding)
 	// Fetch the width of the view for alignment purposes, the returned height is ignored.
-	Width, _ := v.Size()
+	width, height := v.Size()
+
+	// If the view is too small for ASCII, show plain text instead
+	if height < 7 {
+		fmt.Fprintf(v, "\n\n%s", CenterDate(now.Format("03:04:05 PM"), width))
+		fmt.Fprintf(v, "\n%s", CenterDate(now.Format("Mon, Jan 2"), width))
+		return
+	}
 
 	// Format the current time as a string in the 12-hour format including AM/PM.
 	timeStr := now.Format("03:04 PM") // This will output, e.g., "09:55 PM"
@@ -217,7 +285,7 @@ func UpdateViewTime(v *gocui.View, loc *time.Location) {
 	date := fmt.Sprintf("\x1b[1m%s\x1b[0m", now.Format("Monday, January 2, 2006")) // Bold the date.
 	// Print the centered bold date at the bottom of the time display.
 	fmt.Fprint(v, "\n")
-	fmt.Fprintln(v, CenterDate(date, Width))
+	fmt.Fprintln(v, CenterDate(date, width))
 }
 
 // centerTime centers a given string within a specified width using spaces for padding.
@@ -261,32 +329,59 @@ func CenterDate(s string, width int) string {
 	return s // Return as is if no padding is needed.
 }
 
+/*
+Until Feb 2026
+
+	func KeyBindings(g *gocui.Gui) error {
+		if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+			return gocui.ErrQuit
+		}); err != nil {
+			return err
+		}
+
+		// Bind Ctrl+A to swapTimezones function.
+		errSwapToptoBottomLeft := g.SetKeybinding("", gocui.KeyCtrlA, gocui.ModNone, SwapToptoBottomLeft)
+		if errSwapToptoBottomLeft != nil {
+			return errSwapToptoBottomLeft
+		}
+
+		// Bind Ctrl+S to swapTimezones function.
+		errSwapToptoBottomMiddle := g.SetKeybinding("", gocui.KeyCtrlS, gocui.ModNone, SwapToptoBottomMiddle)
+		if errSwapToptoBottomMiddle != nil {
+			return errSwapToptoBottomMiddle
+		}
+
+		// Bind Ctrl+D to swapTimezones function.
+		errSwapToptoBottomRight := g.SetKeybinding("", gocui.KeyCtrlD, gocui.ModNone, SwapToptoBottomRight)
+		if errSwapToptoBottomRight != nil {
+			return errSwapToptoBottomRight
+		}
+
+		return nil
+	}
+*/
 func KeyBindings(g *gocui.Gui) error {
-	if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+	// Standard Quit
+	g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		return gocui.ErrQuit
-	}); err != nil {
-		return err
-	}
+	})
 
-	// Bind Ctrl+A to swapTimezones function.
-	errSwapToptoBottomLeft := g.SetKeybinding("", gocui.KeyCtrlA, gocui.ModNone, SwapToptoBottomLeft)
-	if errSwapToptoBottomLeft != nil {
-		return errSwapToptoBottomLeft
+	// Map keys '1' through '6' to swap timezones[0] with timezones[1..6]
+	keys := []rune{'1', '2', '3', '4', '5', '6'}
+	for i, key := range keys {
+		targetIdx := i + 1
+		g.SetKeybinding("", key, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+			return SwapTimezones(g, 0, targetIdx)
+		})
 	}
-
-	// Bind Ctrl+S to swapTimezones function.
-	errSwapToptoBottomMiddle := g.SetKeybinding("", gocui.KeyCtrlS, gocui.ModNone, SwapToptoBottomMiddle)
-	if errSwapToptoBottomMiddle != nil {
-		return errSwapToptoBottomMiddle
-	}
-
-	// Bind Ctrl+D to swapTimezones function.
-	errSwapToptoBottomRight := g.SetKeybinding("", gocui.KeyCtrlD, gocui.ModNone, SwapToptoBottomRight)
-	if errSwapToptoBottomRight != nil {
-		return errSwapToptoBottomRight
-	}
-
 	return nil
+}
+
+func SwapTimezones(g *gocui.Gui, idxA, idxB int) error {
+	if idxB < len(timezones) {
+		timezones[idxA], timezones[idxB] = timezones[idxB], timezones[idxA]
+	}
+	return nil // The 1-second ticker will refresh the display automatically
 }
 
 func SwapToptoBottomRight(g *gocui.Gui, v *gocui.View) error {
