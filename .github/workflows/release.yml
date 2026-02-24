@@ -5,6 +5,12 @@ on:
     tags:
       - 'v*' # Triggers on any tag starting with 'v'
 
+# ADD THIS BLOCK HERE:
+permissions:
+  contents: write      # Required to create the release and upload assets
+  id-token: write      # Required if you want to use SLSA/Attestations
+  attestations: write  # Optional: hides the SLSA warning by creating provenance
+
 jobs:
   build:
     name: Build Binaries
