@@ -35,9 +35,9 @@ jobs:
 
       - name: Build Binary
         run: |
-          BINARY_NAME=cli-clock-${{ matrix.goos }}-${{ matrix.goarch }}
+          BINARY_NAME=kairos-${{ matrix.goos }}-${{ matrix.goarch }}
           if [ "${{ matrix.goos }}" = "windows" ]; then BINARY_NAME+=".exe"; fi
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o "$BINARY_NAME" main.go
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o "$BINARY_NAME" clock.go
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
