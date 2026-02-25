@@ -1,6 +1,6 @@
 // Author Name: Gerald Z. Villorente
 // Author email: geraldvillorente@gmail.com
-// @2025
+// @2025-2026
 package main
 
 import (
@@ -27,509 +27,395 @@ var (
 		'8': {"█████", "█   █", "█████", "█   █", "█████"},
 		'9': {"█████", "█   █", "█████", "    █", "█████"},
 		':': {"     ", "  █  ", "     ", "  █  ", "     "},
-		// AM and PM digit mappings...
 		'A': {"     ", " ██  ", "█  █ ", "████ ", "█  █ "},
 		'M': {"     ", "█ █ █", "█████", "█ █ █", "█   █"},
 		'P': {"     ", "████ ", "█  █ ", "████ ", "█    "},
-		// Ensure ' ' (space) is also defined if used
 		' ': {"     ", "     ", "     ", "     ", "     "},
 	}
 	timezones = []struct {
 		name     string
 		location string
 	}{
-		{"UTC", "UTC"},                     // Index 0 (Top)
-		{"PST/DST", "America/Los_Angeles"}, // Index 1
-		{"GMT", "Etc/GMT"},                 // Index 2
-		{"Philippine Time", "Asia/Manila"}, // Index 3
-		{"CST", "America/Chicago"},         // Index 4
-		{"MST", "America/Denver"},          // Index 5
-		{"EST", "America/New_York"},        // Index 6
+		{"UTC", "UTC"},
+		{"PST/DST", "America/Los_Angeles"},
+		{"GMT", "Etc/GMT"},
+		{"PHL Time", "Asia/Manila"},
+		{"CST", "America/Chicago"},
+		{"MST", "America/Denver"},
+		{"EST", "America/New_York"},
 	}
 )
 
-// main initializes the application's GUI and its components, sets up timezone locations,
-// and runs the main event loop for handling user input and screen updates.
 func main() {
-	// Declare a variable to capture errors.
-	var err error
-	// Create a new GUI with normal output mode.
+	// Initialize the GUI
 	g, err := gocui.NewGui(gocui.OutputNormal)
 	if err != nil {
-		log.Panicln(err) // Log a panic error if the GUI cannot be created.
+		log.Panicln(err)
 	}
-	defer g.Close() // Ensure that g.Close() is called when the function exits to clean up resources.
+	// Ensures that the GUI resources are properly released when the program exits.
+	defer g.Close()
 
-	// Initialize location objects for storing timezone information.
-	locations = make(map[string]*time.Location) // Create a map to hold location data.
-	for _, tz := range timezones {              // Loop through predefined timezones.
-		// Load each location by timezone identifier.
-		locations[tz.name], err = time.LoadLocation(tz.location)
+	// Load timezones into memory for quick access during updates.
+	locations = make(map[string]*time.Location)
+	for _, tz := range timezones {
+		// Loads the timezone location from the IANA Time Zone database.
+		loc, err := time.LoadLocation(tz.location)
 		if err != nil {
-			// Log a fatal error and exit if a location cannot be loaded.
 			log.Fatalf("Failed to load location for %s: %v", tz.name, err)
 		}
+		// Stores the loaded location in the locations map with the timezone name as the key.
+		locations[tz.name] = loc
 	}
-	// Set the function that defines the layout of the GUI.
+
+	// Set the layout function that will be called to draw the UI.
 	g.SetManagerFunc(layout)
-	// Set keybindings for the GUI; this configures how user inputs are handled.
+	// Set up keybindings for user interactions (swapping timezones and quitting the application).
 	if err := KeyBindings(g); err != nil {
 		log.Panicln("Failed to create keybindings: ", err)
 	}
 
-	// Start a goroutine to update the time every second.
-	go UpdateTimeEverySecond(g)
+	// Update the UI every second to reflect the current time.
+	go func() {
+		// Creates a ticker that sends a value on a channel every second.
+		ticker := time.NewTicker(1 * time.Second)
+		for range ticker.C {
+			// Calls the Update method of the GUI to trigger a redraw of the UI.
+			g.Update(func(g *gocui.Gui) error { return nil })
+		}
+	}()
 
-	// Start the main GUI loop which handles drawing and events.
+	// Start the main event loop for the GUI. This loop listens for user
+	// input and updates the UI accordingly.
 	if err := g.MainLoop(); err != nil && err != gocui.ErrQuit {
 		log.Panicln(err)
 	}
 }
 
-// UpdateTimeEveryMinute is responsible for updating the time every minute.
-func UpdateTimeEverySecond(g *gocui.Gui) {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-	for range ticker.C {
-		g.Update(func(*gocui.Gui) error {
-			if err := layout(g); err != nil {
-				log.Println("Failed to layout:", err)
-			}
-			return nil
-		})
-	}
-}
-
-// layout configures the layout of the GUI views within the application window.
-// It sets up a top view for displaying time in UTC and three bottom views for
-// different time zones using ASCII art for time display.
-/*func layout(g *gocui.Gui) error {
-	// Obtain the maximum horizontal dimension of the GUI.
-	maxX, _ := g.Size()
-
-	// Determine appropriate heights based on the expected size of ASCII art.
-	topHeight := 10 // Height sufficient to display the ASCII art time.
-	// Set the height for the bottom views, typically twice the height of the top view.
-	bottomHeight := topHeight * 2
-
-	// Setting up or updating the top view for UTC.
-	v, err := g.SetView("top", 0, 0, maxX-1, topHeight)
-	if err != nil {
-		if err != gocui.ErrUnknownView {
-			return err
-		}
-	}
-	v.Title = " UTC: Coordinated Universal Time "
-	UpdateViewTime(v, locations["UTC"]) // Ensure this is called regardless of the error type.
-
-	// Set up the bottom left view to display Pacific Standard Time/Daylight Saving Time.
-	SetupBottomView(g, "bottom_left", 0, topHeight+1, maxX/3-1, bottomHeight, " PST/DST: America/Los_Angeles ", locations["PST/DST"])
-	// Set up the bottom middle view to display Eastern Standard Time.
-	SetupBottomView(g, "bottom_middle", maxX/3, topHeight+1, 2*maxX/3-1, bottomHeight, " EST: America/New_York ", locations["EST"])
-	// Set up the bottom right view to display Philippine Time.
-	SetupBottomView(g, "bottom_right", 2*maxX/3, topHeight+1, maxX-1, bottomHeight, " Asia/Manila ", locations["Philippine Time"])
-
-	// Return nil to indicate successful layout setup.
-	return nil
-}*/
-
-/*
-Layout until February 2026
-
-	func layout(g *gocui.Gui) error {
-		maxX, _ := g.Size()
-		topHeight := 10
-		bottomHeight := topHeight * 2
-
-		// Set the top view
-		topView, err := g.SetView("top", 0, 0, maxX-1, topHeight-1)
-		if err != nil && err != gocui.ErrUnknownView {
-			return err
-		}
-		topView.Title = " " + timezones[0].name + " "
-		UpdateViewTime(topView, locations[timezones[0].name])
-
-		// Calculate the width of each bottom view based on the number of timezones minus the top view
-		bottomViewWidth := maxX / (len(timezones) - 1)
-
-		// Set bottom views.
-		for i := 1; i < len(timezones); i++ {
-			x0 := (i - 1) * bottomViewWidth
-			x1 := x0 + bottomViewWidth - 1
-			viewName := fmt.Sprintf("bottom%d", i)
-			bottomView, err := g.SetView(viewName, x0, topHeight, x1, bottomHeight)
-			if err != nil && err != gocui.ErrUnknownView {
-				return err
-			}
-			bottomView.Title = " " + timezones[i].name + " "
-			UpdateViewTime(bottomView, locations[timezones[i].name])
-		}
-
-		return nil
-	}
-*/
+/**
+ * This function is responsible for setting up the layout of the terminal UI using the gocui library.
+ * It divides the screen into a top section for the primary timezone and a grid of smaller sections for additional timezones.
+ * Each section displays the current time, date, and business hours status for its respective timezone.
+ *
+ * The function also includes a help footer at the bottom of the screen that provides instructions for user interactions.
+ *
+ * @param g - The gocui.Gui object representing the terminal UI.
+ * @returns An error if any issues occur during view creation or layout setup.
+ */
 func layout(g *gocui.Gui) error {
+	// Retrieves the current width (maxX) and height (maxY) of your terminal window.
 	maxX, maxY := g.Size()
-
-	// Reserve the last line for the help footer
+	// Reserves the bottom two lines of the terminal so the "Help Footer" doesn't overlap with the clocks.
 	gridMaxY := maxY - 2
+	// Divides the available height into three equal horizontal sections: one for the top clock and two for the bottom grid rows.
 	rowHeight := gridMaxY / 3
 
 	// Top View (Index 0)
+	// The top section is reserved for the primary timezone (UTC). It spans the entire width of the terminal and occupies the first third of the height.
 	if v, err := g.SetView("top", 0, 0, maxX-1, rowHeight-1); err != nil && err != gocui.ErrUnknownView {
 		return err
 	} else {
-		v.Title = " " + timezones[0].name + " "
+		// Gets the current time for the primary timezone (UTC) and sets the title of the top view
+		// to include the timezone name, a day/night icon, and the business hours indicator.
+		now := time.Now().In(locations[timezones[0].name])
+		// The title format is: " UTC 🌞 🟢" (for example), where the icon and business hours indicator change based on the current time.
+		icon := getDayNightIcon(now)
+		// The business hours indicator is determined by the getBusinessHoursIndicator function,
+		// which checks if the current time falls within standard working hours.
+		biz := getBusinessHoursIndicator(now)
+		// Sets the title of the top view to display the timezone name, day/night icon, and business hours indicator.
+		v.Title = fmt.Sprintf(" %s %s %s", timezones[0].name, icon, biz)
+		// Updates the content of the top view to display the current time and date in the primary timezone.
 		UpdateViewTime(v, locations[timezones[0].name])
 	}
 
 	// Bottom Grid (Indices 1-6)
+	// The bottom section is divided into a grid of smaller views for the additional timezones.
+	// The grid is designed to fit up to 6 timezones in a 3-column layout, with each row containing up to 3 timezones.
 	itemsPerRow := 3
-	columnWidth := maxX / itemsPerRow
+	// Calculates the width of each column in the grid by dividing the total width by the number of items per row.
+	colWidth := maxX / itemsPerRow
 	for i := 1; i < len(timezones); i++ {
+		// Calculates the row and column indices for the current timezone in the grid.
 		rowNum := (i - 1) / itemsPerRow
+		// The column index is calculated using modulo arithmetic to ensure it wraps around after reaching the number of items per row.
 		colNum := (i - 1) % itemsPerRow
 
-		x0 := colNum * columnWidth
-		x1 := x0 + columnWidth - 1
+		// Determines the coordinates for the current view based on its row and column position in the grid.
+		// The x-coordinates (x0 and x1) are calculated based on the column index and column width,
+		// while the y-coordinates (y0 and y1) are calculated based on the row index and row height.
+		x0, y0 := colNum*colWidth, (rowNum+1)*rowHeight
+		// Adjusts the x1 coordinate to ensure the last column in the row spans the remaining width of the screen.
+		// Similarly, adjusts the y1 coordinate to ensure the last row in the grid spans the remaining height of the screen.
+		x1, y1 := x0+colWidth-1, y0+rowHeight-1
+		// This logic ensures that the grid layout remains consistent and fills the available space appropriately,
+		// even if the number of timezones is less than the maximum capacity of the grid.
 		if colNum == itemsPerRow-1 {
+			// Adjusts the x1 coordinate to span the remaining width of the screen.
 			x1 = maxX - 1
 		}
+		// If the current row is the last row in the grid, adjusts the y1 coordinate to span the
+		// remaining height of the screen.
+		if rowNum == 1 {
+			// Adjusts the y1 coordinate to span the remaining height of the screen.
+			y1 = gridMaxY - 1
+		}
 
-		y0 := (rowNum + 1) * rowHeight
-		y1 := y0 + rowHeight - 1
-
+		// Creates a new view for the current timezone and sets its title and content.
 		viewName := fmt.Sprintf("bottom%d", i)
+		// If the view already exists, it is reused; otherwise, a new view is created.
 		if v, err := g.SetView(viewName, x0, y0, x1, y1); err != nil && err != gocui.ErrUnknownView {
 			return err
 		} else {
-			v.Title = fmt.Sprintf(" [%d] %s ", i, timezones[i].name) // Show key in title
+			now := time.Now().In(locations[timezones[i].name])
+			// The title is formatted to include the timezone name, the current time, and an indicator for day/night and business hours.
+			v.Title = fmt.Sprintf(" [%d] %s %s %s", i, timezones[i].name, getDayNightIcon(now), getBusinessHoursIndicator(now))
+			// Updates the content of the view to display the current time and date for the respective timezone.
 			UpdateViewTime(v, locations[timezones[i].name])
 		}
 	}
 
-	// 3. Help Footer View
+	// Help footer
+	// Creates a new view for the help footer at the bottom of the screen.
+	// This view spans the entire width of the terminal and is positioned just above the bottom edge.
 	if v, err := g.SetView("help", 0, maxY-2, maxX-1, maxY-1); err != nil {
+		// If the view already exists, it is reused; otherwise, a new view is created.
 		if err != gocui.ErrUnknownView {
 			return err
 		}
 		v.Frame = false
-		v.BgColor = gocui.ColorDefault
 		v.FgColor = gocui.ColorCyan
 		fmt.Fprintln(v, CenterDate("Keys [1-6]: Swap with Top | Ctrl+C: Quit", maxX))
 	}
-
 	return nil
 }
 
-// setupBottomView configures a bottom view in the GUI for displaying time zone specific time.
-// It sets view dimensions, title, and initializes the view with current time for the specified location.
-//
-// Parameters:
-//
-//	g    - The GUI object which manages all views.
-//	name - The name of the view, which acts as a unique identifier.
-//	x0, y0 - The starting coordinates (top-left corner) of the view.
-//	x1, y1 - The ending coordinates (bottom-right corner) of the view.
-//	title - The title of the view, displayed at the top of the view box.
-//	loc   - The time location (timezone) that this view will display.
-func SetupBottomView(g *gocui.Gui, name string, x0, y0, x1, y1 int, title string, loc *time.Location) {
-	v, err := g.SetView(name, x0, y0, x1, y1)
-	if err != nil && err != gocui.ErrUnknownView {
-		return
-	}
-	v.Title = title
-	v.Highlight = true
-	UpdateViewTime(v, loc) // Ensure this is updating the time correctly
-}
-
-// updateViewTime updates the specified view with the current time and date in the given location.
-// It formats the time in a 12-hour format with AM/PM and displays the date in bold.
-//
-// Parameters:
-//
-//	v   - the gocui view where the time and date will be displayed.
-//	loc - the time location (timezone) to display the time for.
+/**
+ * This function updates the time displayed in a specific view.
+ * It takes into account the timezone associated with that view to ensure accurate time representation.
+ *
+ * It handles the time calculation, the blinking animation, adaptive layout for different screen sizes, and the progress bar placement.
+ * The function is designed to be called every second to keep the displayed time up-to-date.
+ *
+ * @param v - The gocui view to update.
+ * @param loc - The time.Location object representing the timezone for that view.
+ */
 func UpdateViewTime(v *gocui.View, loc *time.Location) {
-	// Fetch the current time in the specified location.
+	// Gets the current time specifically for the timezone associated with that view.
 	now := time.Now().In(loc)
-	// Clear the view's content to prepare for new content.
+	// Wipes the previous frame so the new time can be drawn without leaving "ghost" characters behind.
 	v.Clear()
-
-	// Setup padding where text should start to provide visual margins within the view.
-	topPadding, leftPadding := 1, 2 // Add vertical and horizontal padding.
-	// Move the cursor to the start position considering the padding.
-	v.SetCursor(leftPadding, topPadding)
-	// Fetch the width of the view for alignment purposes, the returned height is ignored.
 	width, height := v.Size()
 
-	// If the view is too small for ASCII, show plain text instead
-	if height < 7 {
-		fmt.Fprintf(v, "\n\n%s", CenterDate(now.Format("03:04:05 PM"), width))
+	// Blinking colon logic
+	// The Modulo Operator: Checks if the current second is even or odd.
+	// If it's odd, it replaces the colon with a space (03 04 PM), creating the blinking animation effect.
+	format := "03:04 PM"
+	if now.Second()%2 != 0 {
+		format = "03 04 PM"
+	}
+
+	// Adaptive layout logic
+	// This is a fail-safe for small windows (like a resized terminal or a tablet).
+	// If there isn't enough vertical space for the big ASCII art, it switches to a simple, clean text format.
+	if height < 8 {
+		fmt.Fprintf(v, "\n%s", CenterDate(now.Format("03:04:05 PM"), width))
 		fmt.Fprintf(v, "\n%s", CenterDate(now.Format("Mon, Jan 2"), width))
+		// Moves the "drawing pen" to the very last line of the box to place the progress bar.
+		v.SetCursor(0, height-1)
+		fmt.Fprint(v, getDayProgressBar(now, width))
 		return
 	}
 
-	// Format the current time as a string in the 12-hour format including AM/PM.
-	timeStr := now.Format("03:04 PM") // This will output, e.g., "09:55 PM"
-	// Convert the time string to ASCII art representation for visual enhancement.
-	asciiArt := PrintTimeASCII(timeStr)
-	// Fetch the maximum width of the view again to ensure accurate width during alignment.
-	maxWidth, _ := v.Size() // Get the maximum width of the view.
-	fmt.Fprint(v, "\n\n")
-	// Print each line of the ASCII art centered within the view.
-	for _, line := range asciiArt {
-		fmt.Fprintln(v, CenterTime(line, maxWidth))
-	}
-	// Format the current date in bold for emphasis and clarity.
-	date := fmt.Sprintf("\x1b[1m%s\x1b[0m", now.Format("Monday, January 2, 2006")) // Bold the date.
-	// Print the centered bold date at the bottom of the time display.
+	// Converts the formatted time string into a slice of strings representing the large block characters.
+	// Each line of the ASCII art is then centered horizontally within the view.
+	asciiArt := PrintTimeASCII(now.Format(format))
 	fmt.Fprint(v, "\n")
-	fmt.Fprintln(v, CenterDate(date, width))
+	for _, line := range asciiArt {
+		fmt.Fprintln(v, CenterTime(line, width))
+	}
+
+	// Adds the date below the time.
+	// The date is formatted in a more traditional way (Monday, January 2, 2006) and is also centered.
+	// The date is bolded using ANSI escape codes.
+	dateStr := fmt.Sprintf("\x1b[1m%s\x1b[0m", now.Format("Monday, January 2, 2006"))
+	fmt.Fprintln(v, CenterDate(dateStr, width))
+
+	// Adds the business hours indicator.
+	fmt.Fprintln(v, CenterDate(getBusinessHoursIndicator(now), width))
+
+	// Moves the "drawing pen" to the very last line of the box to place the progress bar.
+	v.SetCursor(0, height-1)
+	fmt.Fprint(v, getDayProgressBar(now, width))
 }
 
-// centerTime centers a given string within a specified width using spaces for padding.
-// Parameters:
-//
-//	s - the string to be centered.
-//	width - the total width within which the string should be centered.
-func CenterTime(s string, width int) string {
-	// Calculate the number of spaces needed on each side of the string to center it.
-	// runewidth.StringWidth(s) computes the visual width of the string considering wide characters.
-	padSize := (width - runewidth.StringWidth(s)) / 2
-	// If the calculated padding size is greater than zero, pad the string with spaces.
-	if padSize > 0 {
-		// strings.Repeat(" ", padSize) creates a string consisting of 'padSize' spaces.
-		// The string 's' is sandwiched between two such strings to center it within the 'width'.
-		return strings.Repeat(" ", padSize) + s + strings.Repeat(" ", padSize)
+/**
+ * This function determines if a specific timezone is currently within standard
+ * working hours (9:00 AM to 5:00 PM, Monday through Friday) and returns a visual status indicator.
+ */
+func getBusinessHoursIndicator(now time.Time) string {
+	// Retrieves the current hour in a 24-hour format (0–23).
+	hour := now.Hour()
+	// Identifies the day of the week (Sunday through Saturday).
+	weekday := now.Weekday()
+
+	// Check if it's a weekday (Mon-Fri) and between 9 AM and 5 PM.
+	// Note that hour < 17 means the green light stays on until 4:59:59 PM;
+	// once it hits 5:00 PM (hour 17), it switches to "closed".
+	if weekday >= time.Monday && weekday <= time.Friday && hour >= 9 && hour < 17 {
+		return "🟢" // Open for business
 	}
-	// If no padding is needed, or if 'padSize' is zero or negative, return the original string.
+	return "⚫" // Outside business hours
+}
+
+/**
+ * This function calculates the percentage of the day that has passed and displays a progress bar.
+ * The progress bar is color-coded to indicate different times of the day.
+ * @param now - The current time.
+ * @param width - The width of the progress bar.
+ * @returns The progress bar as a string.
+ */
+func getDayProgressBar(now time.Time, width int) string {
+	// 1. Calculate elapsed and remaining time
+	// This converts the current time into total seconds passed since midnight.
+	// Since there are exactly $86,400$ seconds in a day, dividing by this number gives a decimal percentage ($0.0$ to $1.0$).
+	secondsElapsed := float64(now.Hour()*3600 + now.Minute()*60 + now.Second())
+	totalSeconds := 86400.0
+	percent := secondsElapsed / totalSeconds
+
+	// Calculate remaining time
+	remainingSecs := int(totalSeconds - secondsElapsed)
+	remHours := remainingSecs / 3600
+	remMins := (remainingSecs % 3600) / 60
+	timeRemaining := fmt.Sprintf(" %dh %dm left", remHours, remMins)
+
+	// 2. Adjust bar width to make room for the text
+	// We subtract the length of the countdown string from the available width
+	// It takes the total available width of the UI box and subtracts 2 to account for the leading and trailing brackets [].
+	barWidth := width - 2 - len(timeRemaining)
+	if barWidth < 0 {
+		barWidth = 0
+	}
+	// Multiplies the available bar width by the percentage to determine how many "solid" blocks (█) to draw.
+	fillWidth := int(float64(barWidth) * percent)
+
+	// 3. Dynamic Color Logic
+	// Green: The default color for morning and daytime. Active during standard
+	// business hours (9:00 AM to 5:00 PM).
+	color := "\x1b[32m"
+	// Yellow: Triggered between 5:00 PM and 9:00 PM, signaling the end of the day.
+	if now.Hour() >= 17 && now.Hour() < 21 {
+		color = "\x1b[33m"
+	}
+	// Red: Triggered from 9:00 PM until 5:00 AM, indicating late-night hours.
+	if now.Hour() >= 21 || now.Hour() < 5 {
+		color = "\x1b[31m"
+	}
+
+	// 4. Construct the Final String
+	bar := "[" + strings.Repeat("█", fillWidth) + strings.Repeat(" ", barWidth-fillWidth) + "]"
+	return color + bar + timeRemaining + "\x1b[0m"
+}
+
+/**
+ * This function returns a sun or moon icon based on the current time.
+ * @param now - The current time.
+ * @returns The sun or moon icon as a string.
+ */
+func getDayNightIcon(now time.Time) string {
+	if now.Hour() >= 6 && now.Hour() < 18 {
+		return "🌞"
+	}
+	return "🌙"
+}
+
+/**
+ * This function centers a given string within a specified width by adding leading spaces.
+ * If the string is shorter than the width, it calculates the necessary padding and adds spaces to the left.
+ * If the string is longer than the width, it returns the original string without modification.
+ *
+ * @param s - The string to be centered.
+ * @param width - The total width within which to center the string.
+ * @returns The centered string with leading spaces if necessary.
+ */
+func CenterTime(s string, width int) string {
+	// The runewidth.StringWidth function is used to calculate the display width of the string,
+	// accounting for any wide characters (like emojis) that may take up more than one column in the terminal.
+	pad := (width - runewidth.StringWidth(s)) / 2
+	if pad > 0 {
+		return strings.Repeat(" ", pad) + s
+	}
 	return s
 }
 
-// centerDate centers a string within a given width, ensuring that ANSI escape codes do not affect the alignment.
-// Parameters:
-//
-//	s - the string to be centered, potentially containing ANSI escape codes.
-//	width - the total width within which the string should be centered.
+/**
+ * This function centers a given string within a specified width by adding leading spaces.
+ * If the string is shorter than the width, it calculates the necessary padding and adds spaces to the left.
+ * If the string is longer than the width, it returns the original string without modification.
+ *
+ * @param s - The string to be centered.
+ * @param width - The total width within which to center the string.
+ * @returns The centered string with leading spaces if necessary.
+ */
 func CenterDate(s string, width int) string {
-	// Remove the ANSI escape codes for bold from the string to calculate the visual width correctly.
-	cleanString := strings.Replace(s, "\x1b[1m", "", -1)          // Remove the ANSI start bold.
-	cleanString = strings.Replace(cleanString, "\x1b[0m", "", -1) // Remove the ANSI end bold.
-	// Calculate the actual visual width of the string using runewidth.StringWidth,
-	// which accounts for wide characters and correctly computes length ignoring ANSI codes.
-	lineWidth := runewidth.StringWidth(cleanString) // Calculate the visual width of the string.
-	// Calculate how many spaces are needed on each side to center the text within the specified width.
-	padSize := (width - lineWidth) / 2 // Determine the number of spaces needed to pad the string on both sides.
-
-	if padSize > 0 {
-		padding := strings.Repeat(" ", padSize)
-		return padding + s + padding // Pad the original string to maintain ANSI codes.
+	// This function is similar to CenterTime but includes a step to remove
+	// ANSI escape codes (like bold formatting) from the string before calculating its width.
+	clean := strings.NewReplacer("\x1b[1m", "", "\x1b[0m", "").Replace(s)
+	// The runewidth.StringWidth function is used to calculate the display width of the string,
+	// accounting for any wide characters (like emojis) that may take up more than one column in the terminal.
+	pad := (width - runewidth.StringWidth(clean)) / 2
+	// If the calculated padding is greater than zero, it adds that many spaces to the left of the string to center it.
+	if pad > 0 {
+		return strings.Repeat(" ", pad) + s
 	}
-	return s // Return as is if no padding is needed.
+	return s
 }
 
-/*
-Until Feb 2026
-
-	func KeyBindings(g *gocui.Gui) error {
-		if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-			return gocui.ErrQuit
-		}); err != nil {
-			return err
-		}
-
-		// Bind Ctrl+A to swapTimezones function.
-		errSwapToptoBottomLeft := g.SetKeybinding("", gocui.KeyCtrlA, gocui.ModNone, SwapToptoBottomLeft)
-		if errSwapToptoBottomLeft != nil {
-			return errSwapToptoBottomLeft
-		}
-
-		// Bind Ctrl+S to swapTimezones function.
-		errSwapToptoBottomMiddle := g.SetKeybinding("", gocui.KeyCtrlS, gocui.ModNone, SwapToptoBottomMiddle)
-		if errSwapToptoBottomMiddle != nil {
-			return errSwapToptoBottomMiddle
-		}
-
-		// Bind Ctrl+D to swapTimezones function.
-		errSwapToptoBottomRight := g.SetKeybinding("", gocui.KeyCtrlD, gocui.ModNone, SwapToptoBottomRight)
-		if errSwapToptoBottomRight != nil {
-			return errSwapToptoBottomRight
-		}
-
-		return nil
-	}
-*/
+/**
+ * This function sets up keybindings for user interactions within the terminal UI.
+ * It allows users to swap the primary timezone with any of the additional timezones by pressing keys 1-6.
+ * It also binds Ctrl+C to quit the application gracefully.
+ *
+ * @param g - The gocui.Gui object representing the terminal UI.
+ * @returns An error if any issues occur during keybinding setup.
+ */
 func KeyBindings(g *gocui.Gui) error {
-	// Standard Quit
-	g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		return gocui.ErrQuit
-	})
-
-	// Map keys '1' through '6' to swap timezones[0] with timezones[1..6]
-	keys := []rune{'1', '2', '3', '4', '5', '6'}
-	for i, key := range keys {
-		targetIdx := i + 1
-		g.SetKeybinding("", key, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-			return SwapTimezones(g, 0, targetIdx)
+	// Binds the Ctrl+C key combination to a function that quits the application.
+	g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error { return gocui.ErrQuit })
+	for i := 1; i <= 6; i++ {
+		idx := i
+		// Binds the key combination of the number key (1-6) to a function that swaps the primary timezone with the selected timezone.
+		g.SetKeybinding("", rune('0'+i), gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+			timezones[0], timezones[idx] = timezones[idx], timezones[0]
+			return nil
 		})
 	}
 	return nil
 }
 
-func SwapTimezones(g *gocui.Gui, idxA, idxB int) error {
-	if idxB < len(timezones) {
-		timezones[idxA], timezones[idxB] = timezones[idxB], timezones[idxA]
-	}
-	return nil // The 1-second ticker will refresh the display automatically
-}
-
-func SwapToptoBottomRight(g *gocui.Gui, v *gocui.View) error {
-	// Swap UTC and Philippine Time in the `timezones` slice
-	// Assuming they are at specific indices, you might need to adjust these based on your slice setup
-	// Assuming UTC is index 0 and Philippine Time is index 3
-	// Swap the timezones. This is a more generic approach that works for any slice length.
-	timezones[0], timezones[3] = timezones[3], timezones[0]
-
-	g.Update(func(gui *gocui.Gui) error {
-		// Directly handle the error inside this function.
-		err := layout(gui)
-		if err != nil {
-			log.Println("Error updating GUI:", err)
-		}
-		return nil
-	})
-
-	return nil
-}
-
-func SwapToptoBottomLeft(g *gocui.Gui, v *gocui.View) error {
-	// Swap UTC and PST in the `timezones` slice
-	// Assuming they are at specific indices, you might need to adjust these based on your slice setup
-	// Assuming UTC is index 0 and PST is index 1
-	// Swap the timezones. This is a more generic approach that works for any slice length.
-	timezones[0], timezones[1] = timezones[1], timezones[0]
-
-	g.Update(func(gui *gocui.Gui) error {
-		// Directly handle the error inside this function.
-		err := layout(gui)
-		if err != nil {
-			log.Println("Error updating GUI:", err)
-		}
-		return nil
-	})
-
-	return nil
-}
-
-func SwapToptoBottomMiddle(g *gocui.Gui, v *gocui.View) error {
-	// Swap UTC and PST in the `timezones` slice
-	// Assuming they are at specific indices, you might need to adjust these based on your slice setup
-	// Assuming UTC is index 0 and PST is index 1
-	// Swap the timezones. This is a more generic approach that works for any slice length.
-	timezones[0], timezones[2] = timezones[2], timezones[0]
-
-	g.Update(func(gui *gocui.Gui) error {
-		// Directly handle the error inside this function.
-		err := layout(gui)
-		if err != nil {
-			log.Println("Error updating GUI:", err)
-		}
-		return nil
-	})
-
-	return nil
-}
-
-func SwapUTCtoPST(g *gocui.Gui, v *gocui.View) error {
-	// Swap UTC and PST in the `timezones` slice
-	// Assuming they are at specific indices, you might need to adjust these based on your slice setup
-	// Assuming UTC is index 0 and PST is index 1
-	// Swap the timezones. This is a more generic approach that works for any slice length.
-	timezones[0], timezones[1] = timezones[1], timezones[0]
-
-	g.Update(func(gui *gocui.Gui) error {
-		// Directly handle the error inside this function.
-		err := layout(gui)
-		if err != nil {
-			log.Println("Error updating GUI:", err)
-		}
-		return nil
-	})
-
-	return nil
-}
-
-// nextView cycles to the next view in the GUI.
-func NextView(g *gocui.Gui, v *gocui.View) error {
-	return SwitchView(g, true)
-}
-
-// prevView cycles to the previous view in the GUI.
-func PrevView(g *gocui.Gui, v *gocui.View) error {
-	return SwitchView(g, false)
-}
-
-// switchView changes the currently active view in the gocui GUI.
-// Parameters:
-//
-//	g - the GUI object containing all views.
-//	next - a boolean that determines the direction of the switch; true for next, false for previous.
-func SwitchView(g *gocui.Gui, next bool) error {
-	// Retrieve all views managed by the GUI.
-	views := g.Views()
-	// If there are less than two views, there's no need to switch, return immediately.
-	if len(views) < 2 {
-		return nil // Not enough views to switch between.
-	}
-	// Variable to store the index of the current active view.
-	var currentIdx int
-	// Iterate over all views to find the index of the current view.
-	for i, view := range views {
-		if g.CurrentView() == view {
-			currentIdx = i // Store the index of the current view.
-			break          // Stop the loop once the current view is found.
-		}
-	}
-	// Calculate the index of the next or previous view to switch to based on the 'next' parameter.
-	if next {
-		// Increment the index and wrap around using modulo to cycle through views circularly.
-		currentIdx = (currentIdx + 1) % len(views)
-	} else {
-		// Decrement the index and wrap around using modulo to cycle through views circularly.
-		// This ensures that navigating backwards from the first view brings you to the last view.
-		currentIdx = (currentIdx - 1 + len(views)) % len(views)
-	}
-	// Set the current view to the view at the calculated index.
-	g.SetCurrentView(views[currentIdx].Name())
-	// Return no error upon successful completion of the view switch.
-	return nil
-}
-
-// printTimeASCII converts a time string into a series of lines that form an ASCII art representation.
+/**
+ * This function converts a given time string into its ASCII art representation.
+ * It iterates over each character in the time string, retrieves the corresponding ASCII art from the digits map,
+ * and constructs the final ASCII art lines by combining the lines of each character.
+ *
+ * @param t - The time string to be converted into ASCII art.
+ * @returns A slice of strings, where each string represents a line of the ASCII art.
+ */
 func PrintTimeASCII(t string) []string {
-	// Create an array to hold 5 strings, as each digit or character in the ASCII art representation
-	// is assumed to span 5 lines vertically.
-	// Assuming each part of the digits and letters has 5 lines
+	// Initializes a slice of strings to hold the lines of the ASCII art.
+	// Each line will be built by concatenating the corresponding lines of each character's ASCII art.
 	lines := make([]string, 5)
-	// Iterate over each character in the input string `t`.
-	for _, digit := range t {
-		// Retrieve the ASCII art corresponding to the current character.
-		art, ok := digits[digit]
-		// If the ASCII art for the character is not found, output a debug message and skip this character.
+	for _, char := range t {
+		// Retrieves the ASCII art for the current character from the digits map.
+		// If the character is not found in the map, it skips to the next character.
+		art, ok := digits[char]
 		if !ok {
-			// Debug: check for missing characters in the ASCII art map.
-			fmt.Println("Missing art for:", string(digit))
-			// Skip missing characters to prevent panic.
 			continue
 		}
-		// For each line of the ASCII art (assumed to be 5 lines), append it to the corresponding line in the `lines` array.
-		// Loop through each line of the ASCII art.
+		// Iterates over each line of the ASCII art for the current character and appends it to the corresponding line in the lines slice.
+		// Each line of the ASCII art is followed by a space to separate characters.
 		for i := 0; i < 5; i++ {
-			// Add a space after each character for visual separation.
 			lines[i] += art[i] + " "
 		}
 	}
-	// Return the completed lines of ASCII art.
 	return lines
 }
