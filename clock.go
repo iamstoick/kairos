@@ -177,15 +177,29 @@ func layout(g *gocui.Gui) error {
 	// Help footer
 	// Creates a new view for the help footer at the bottom of the screen.
 	// This view spans the entire width of the terminal and is positioned just above the bottom edge.
-	if v, err := g.SetView("help", 0, maxY-2, maxX-1, maxY-1); err != nil {
+	if v, err := g.SetView("help", -1, maxY-3, maxX, maxY-1); err != nil {
 		// If the view already exists, it is reused; otherwise, a new view is created.
 		if err != gocui.ErrUnknownView {
 			return err
 		}
 		v.Frame = false
 		v.FgColor = gocui.ColorCyan
-		fmt.Fprintln(v, CenterDate("Keys [1-6]: Swap with Top | Ctrl+C: Quit", maxX))
+		v.BgColor = gocui.ColorDefault
 	}
+	// Updates the content of the help footer to display instructions for user interactions and the last update time.
+	if v, err := g.View("help"); err == nil {
+		v.Clear()
+		v.SetCursor(0, 0)
+
+		heartbeat := time.Now().Format("15:04:05")
+		// The help text includes instructions for swapping timezones (Keys [1-6]) and quitting the application (Ctrl+C).
+		helpText := fmt.Sprintf("Keys [1-6]: Swap | Ctrl+C: Quit | Updated: %s", heartbeat)
+
+		// Use Fprint instead of Fprintln to avoid an extra newline
+		// that might trigger a scroll-down in a 1-line view.
+		fmt.Fprint(v, CenterDate(helpText, maxX))
+	}
+
 	return nil
 }
 
