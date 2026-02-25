@@ -6,11 +6,13 @@ package main
 import (
 	"fmt"
 	"log"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/jroimartin/gocui"
 	runewidth "github.com/mattn/go-runewidth"
+	"github.com/shirou/gopsutil/v3/cpu"
 )
 
 var (
@@ -44,6 +46,9 @@ var (
 		{"MST", "America/Denver"},
 		{"EST", "America/New_York"},
 	}
+
+	currentCPU string
+	currentMEM string
 )
 
 func main() {
@@ -83,6 +88,9 @@ func main() {
 			g.Update(func(g *gocui.Gui) error { return nil })
 		}
 	}()
+
+	// Start the stats worker to update CPU and memory usage.
+	startStatsWorker()
 
 	// Start the main event loop for the GUI. This loop listens for user
 	// input and updates the UI accordingly.
@@ -191,13 +199,17 @@ func layout(g *gocui.Gui) error {
 		v.Clear()
 		v.SetCursor(0, 0)
 
+		// Get the current time for the heartbeat
 		heartbeat := time.Now().Format("15:04:05")
+		//memStats := getSystemStats()
+		//cpuStats := getCPUStats()
 		// The help text includes instructions for swapping timezones (Keys [1-6]) and quitting the application (Ctrl+C).
-		helpText := fmt.Sprintf("Keys [1-6]: Swap | Ctrl+C: Quit | Updated: %s", heartbeat)
+		// Display the cached global strings
+		footerText := fmt.Sprintf(" %s | %s | %s | Updated: %s ❤️", currentCPU, currentMEM, "Keys [1-6]: Swap", heartbeat)
 
 		// Use Fprint instead of Fprintln to avoid an extra newline
 		// that might trigger a scroll-down in a 1-line view.
-		fmt.Fprint(v, CenterDate(helpText, maxX))
+		fmt.Fprint(v, CenterDate(footerText, maxX))
 	}
 
 	return nil
@@ -340,6 +352,107 @@ func getDayNightIcon(now time.Time) string {
 		return "🌞"
 	}
 	return "🌙"
+}
+
+/**
+ * This function retrieves system memory statistics and formats them into a string.
+ * It calculates the allocated memory, total system memory, and the percentage of memory used.
+ * The result is formatted with color coding based on the usage percentage.
+ * @returns A formatted string containing memory statistics with color coding.
+ */
+func getSystemStats() string {
+	// Retrieves memory statistics from the runtime package,
+	// which provides information about the memory usage of the Go program.
+	var m runtime.MemStats
+	// The ReadMemStats function populates the MemStats struct with the current memory usage data.
+	runtime.ReadMemStats(&m)
+
+	// Convert to Megabytes
+	// The allocated memory is divided by 1024 twice to convert it from bytes to megabytes.
+	// The total system memory is also converted from bytes to megabytes.
+	allocMB := m.Alloc / 1024 / 1024
+	totalMB := m.Sys / 1024 / 1024
+	// The usage percentage is calculated by dividing the allocated memory by the
+	// total system memory and multiplying by 100.
+	usagePercent := float64(m.Alloc) / float64(m.Sys) * 100
+
+	// Color coding based on usage percentage
+	// The color is initially set to green, which is the default color for low memory usage.
+	color := "\x1b[32m"
+	// If the usage percentage is greater than 50%, the color is set to yellow.
+	if usagePercent > 50 {
+		color = "\x1b[33m"
+	}
+	// If the usage percentage is greater than 80%, the color is set to red.
+	if usagePercent > 80 {
+		color = "\x1b[31m"
+	}
+
+	return fmt.Sprintf("MEM: %s%dMB/%dMB (%.1f%%)\x1b[0m", color, allocMB, totalMB, usagePercent)
+}
+
+/**
+ * This function retrieves the CPU usage percentage and formats it into a string with color coding.
+ * @returns A formatted string containing the CPU usage percentage with color coding.
+ */
+func getCPUStats() string {
+	// Get CPU percent over a 0-second interval (last known value)
+	percentages, err := cpu.Percent(0, false)
+	// If there's an error retrieving CPU stats or if the returned slice is empty,
+	// it returns a default string indicating that the CPU usage is unavailable.
+	if err != nil || len(percentages) == 0 {
+		return "CPU: --%"
+	}
+
+	// Color coding based on usage percentage
+	usage := percentages[0]
+	// The color is initially set to green, which is the default color for low CPU usage.
+	color := "\x1b[32m"
+	// If the usage percentage is greater than 50%, the color is set to yellow.
+	if usage > 50 {
+		color = "\x1b[33m"
+	}
+	// If the usage percentage is greater than 80%, the color is set to red.
+	if usage > 80 {
+		color = "\x1b[31m"
+	}
+
+	return fmt.Sprintf("CPU: %s%.1f%%\x1b[0m", color, usage)
+}
+
+/**
+ * This function starts a worker goroutine that periodically updates the CPU and memory usage statistics.
+ * The worker runs every 2 seconds and updates the global variables `currentCPU` and `currentMEM` with the latest statistics.
+ */
+func startStatsWorker() {
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		for range ticker.C {
+			// Update CPU
+			percentages, _ := cpu.Percent(0, false)
+			if len(percentages) > 0 {
+				usage := percentages[0]
+				color := "\x1b[32m"
+				if usage > 50 {
+					color = "\x1b[33m"
+				}
+				if usage > 80 {
+					color = "\x1b[31m"
+				}
+				currentCPU = fmt.Sprintf("CPU: %s%.1f%%\x1b[0m", color, usage)
+			}
+
+			// Update Memory
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			usagePercent := float64(m.Alloc) / float64(m.Sys) * 100
+			color := "\x1b[32m"
+			if usagePercent > 50 {
+				color = "\x1b[33m"
+			}
+			currentMEM = fmt.Sprintf("MEM: %s%dMB\x1b[0m", color, m.Alloc/1024/1024)
+		}
+	}()
 }
 
 /**
