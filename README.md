@@ -84,4 +84,4 @@ Kairos operates as a full CLI utility. Use the following commands to manage your
 - `Ctrl + C`: Gracefully exit the application.
 
 ## 📄 License
-© 2025-2026 Gerald Z. Villorente. Licensed under the MIT License.
+© 2025-2026 Gerald Z. Villorente. Licensed under the GNU GENERAL PUBLIC LICENSE.
