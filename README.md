@@ -1,4 +1,5 @@
-<img width="1619" height="757" alt="image" src="https://github.com/user-attachments/assets/a9c8fef9-5287-433e-bcb5-02472cb667fe" />
+<img width="1805" height="936" alt="image" src="https://github.com/user-attachments/assets/ba14f480-ee81-4277-962b-659d64a975e8" />
+
 
 # 🕒 Kairos - CLI Multi-Timezone Clock
 **High-Performance Terminal World Clock & System Monitor**
