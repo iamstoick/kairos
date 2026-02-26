@@ -1,13 +1,11 @@
 <img width="1619" height="757" alt="image" src="https://github.com/user-attachments/assets/a9c8fef9-5287-433e-bcb5-02472cb667fe" />
 
 # 🕒 Kairos - CLI Multi-Timezone Clock
-**A High-Performance Terminal World Clock & System Monitor**
+**High-Performance Terminal World Clock & System Monitor**
 
 A highly customizable, interactive Command Line Interface (CLI) clock built in Go. It features a 1-3-3 grid layout that displays a primary focus timezone and six secondary timezones with real-time ASCII art rendering.
 
 Kairos is a specialized CLI dashboard designed for developers and remote teams. It combines high-fidelity ASCII clocks, real-time system metrics (CPU/MEM), and an interactive timezone-swapping grid.
-
-## ✨ Features
 
 ## ✨ Features
 - **Dynamic 1-3-3 Layout**: One primary focus view and a grid for secondary timezones.
