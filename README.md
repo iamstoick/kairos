@@ -1,4 +1,4 @@
-<img width="1805" height="936" alt="image" src="https://github.com/user-attachments/assets/ba14f480-ee81-4277-962b-659d64a975e8" />
+<img width="1807" height="940" alt="image" src="https://github.com/user-attachments/assets/d3f3a6cc-01c6-4153-b99b-e2dd943c71dd" />
 
 
 # 🕒 Kairos - CLI Multi-Timezone Clock
