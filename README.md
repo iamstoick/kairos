@@ -1,16 +1,20 @@
 <img width="1619" height="757" alt="image" src="https://github.com/user-attachments/assets/a9c8fef9-5287-433e-bcb5-02472cb667fe" />
 
 # 🕒 Kairos - CLI Multi-Timezone Clock
+**A High-Performance Terminal World Clock & System Monitor**
 
 A highly customizable, interactive Command Line Interface (CLI) clock built in Go. It features a 1-3-3 grid layout that displays a primary focus timezone and six secondary timezones with real-time ASCII art rendering.
 
+Kairos is a specialized CLI dashboard designed for developers and remote teams. It combines high-fidelity ASCII clocks, real-time system metrics (CPU/MEM), and an interactive timezone-swapping grid.
+
 ## ✨ Features
 
-- **1-3-3 Dynamic Layout**: Displays one large "Focus" clock on top and two rows of three secondary clocks below.
-- **Real-time ASCII Art**: Renders time using block characters for high visibility.
-- **Interactive Swapping**: Use keys 1 through 6 to instantly swap any secondary timezone into the primary top position.
-- **Adaptive UI**: Automatically switches to plain text if the terminal window is too small to display ASCII art.
-- **Global Standard**: Built-in support for UTC, GMT, PST, and Philippine Time.
+## ✨ Features
+- **Dynamic 1-3-3 Layout**: One primary focus view and a grid for secondary timezones.
+- **Interactive Swapping**: Instantly swap any secondary timezone into the primary view using keys `1-6`.
+- **System Awareness**: Integrated background workers monitor CPU and Memory usage with color-coded alerts.
+- **Persistence**: Save your favorite timezones locally; no need to re-configure on every launch.
+- **Smart Indicators**: Visual icons for Day/Night and Business Hours (🟢/⚫).
 
 ## ⌨️ Keybindings
 
@@ -21,8 +25,15 @@ A highly customizable, interactive Command Line Interface (CLI) clock built in G
 | Ctrl + C   | Quit Application                                          |          
 
 ## 🚀 Installation
+
+### Using Go CLI
 Ensure you have Go installed on your machine.
 
+```
+go install [github.com/geraldvillorente/kairos@latest](https://github.com/geraldvillorente/kairos@latest)
+```
+
+### Using Source Code
 1. Clone the repository:
 ```
 git clone git@github.com:iamstoick/kairos.git
@@ -32,24 +43,46 @@ cd kairos
 ```
 go get github.com/jroimartin/gocui
 go get github.com/mattn/go-runewidth
+go get github.com/shirou/gopsutil/v3/cpu
 ```
 3. Run the application:
 ```
 go run clock.go
 ```
-
-## 🛠️ Configuration
-You can easily modify the displayed timezones by editing the `timezones` slice in `clock.go`:
+4. Optional: Build the binary:
 ```
-timezones = []struct {
-    name     string
-    location string
-}{
-    {"UTC", "UTC"},
-    {"PST/DST", "America/Los_Angeles"},
-    {"GMT", "Etc/GMT"},
-    {"Philippine Time", "Asia/Manila"},
-    // Add more here...
-}
+go build -o kairos clock.go     
+```
+Then run the binary:
+```
+./kairos    
+```
+Or move the binary to a directory in your PATH:
+```
+mv kairos /usr/local/bin/
+```
+Then run the binary:
+```
+kairos  
 ```
 
+### Using the binary release
+See the latest release here: [Releases](https://github.com/iamstoick/kairos/releases)
+
+## 🛠️ Usage
+Kairos operates as a full CLI utility. Use the following commands to manage your dashboard:
+
+| Command	                    |    Description                                                    |
+| ---	                        | ---                                                               |
+| kairos	                    | Launch the interactive TUI dashboard.                             |
+| kairos add "Name" "Location"	| Add a new timezone (e.g., kairos add "NYC" "America/New_York").   |
+| kairos remove "Name"	        | Remove a timezone from your configuration.                        |
+| kairos list	                | List all configured timezones and their IDs.                      |
+| kairos help	                | Show the help menu.                                               |
+
+## ⌨️ Dashboard Controls
+- `1` - `6`: Swap the timezone at that index with the top (primary) view.
+- `Ctrl + C`: Gracefully exit the application.
+
+## 📄 License
+© 2025-2026 Gerald Z. Villorente. Licensed under the MIT License.

@@ -4,8 +4,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -14,6 +17,13 @@ import (
 	runewidth "github.com/mattn/go-runewidth"
 	"github.com/shirou/gopsutil/v3/cpu"
 )
+
+// TimezoneConfig defines the structure for saved timezones.
+// Fields must be capitalized to be exported for JSON encoding.
+type TimezoneConfig struct {
+	Name     string `json:"name"`
+	Location string `json:"location"`
+}
 
 var (
 	locations map[string]*time.Location
@@ -34,24 +44,92 @@ var (
 		'P': {"     ", "████ ", "█  █ ", "████ ", "█    "},
 		' ': {"     ", "     ", "     ", "     ", "     "},
 	}
-	timezones = []struct {
-		name     string
-		location string
-	}{
-		{"UTC", "UTC"},
-		{"PST/DST", "America/Los_Angeles"},
-		{"GMT", "Etc/GMT"},
-		{"PHL Time", "Asia/Manila"},
-		{"CST", "America/Chicago"},
-		{"MST", "America/Denver"},
-		{"EST", "America/New_York"},
-	}
 
-	currentCPU string
-	currentMEM string
+	timezones []TimezoneConfig
+
+	currentCPU        string
+	currentMEM        string
+	notification      string
+	notificationTimer *time.Timer
 )
 
 func main() {
+	// Load the configuration file first to populate the
+	// timezones variable with any saved settings from previous runs.
+	loadConfig()
+
+	// Check for command-line arguments to add or remove timezones before starting the GUI.
+	if len(os.Args) > 1 {
+		command := os.Args[1]
+		switch command {
+		case "help":
+			printHelp()
+			return
+		case "list":
+			printList()
+			return
+		case "add":
+			if len(os.Args) != 4 {
+				fmt.Println("Usage: kairos add \"Name\" \"Location/City\"")
+				return
+			}
+			// Add to slice using the named TimezoneConfig type and save
+			timezones = append(timezones, TimezoneConfig{
+				Name:     os.Args[2],
+				Location: os.Args[3],
+			})
+			saveConfig()
+			fmt.Printf("Added %s successfully!\n", os.Args[2])
+			return
+
+		case "remove":
+			if len(os.Args) != 3 {
+				fmt.Println("Usage: kairos remove \"Name\"")
+				return
+			}
+
+			// Create a new slice of the SAME type to store remaining zones
+			var newList []TimezoneConfig
+			found := false
+			for _, tz := range timezones {
+				if tz.Name != os.Args[2] {
+					newList = append(newList, tz)
+				} else {
+					found = true
+				}
+			}
+
+			if !found {
+				fmt.Printf("Timezone '%s' not found.\n", os.Args[2])
+				return
+			}
+
+			timezones = newList
+			saveConfig()
+			fmt.Printf("Removed %s successfully!\n", os.Args[2])
+			return
+		default:
+			fmt.Printf("Unknown command: %s\n", command)
+			fmt.Println("Type 'kairos help' for usage instructions.")
+			return
+		}
+	}
+
+	// If no command-line arguments are provided, it proceeds to run the terminal-based GUI application.
+	runGUI()
+}
+
+/**
+ * This function initializes and runs the terminal-based GUI application using the gocui library.
+ * It sets up the GUI, loads timezone locations, defines the layout, keybindings, and starts the main event loop.
+ */
+func runGUI() {
+	if len(timezones) == 0 {
+		fmt.Println("No timezones configured. Use: kairos add \"Name\" \"Location\"")
+		fmt.Println("Example: kairos add \"PHL\" \"Asia/Manila\"")
+		return
+	}
+
 	// Initialize the GUI
 	g, err := gocui.NewGui(gocui.OutputNormal)
 	if err != nil {
@@ -64,12 +142,12 @@ func main() {
 	locations = make(map[string]*time.Location)
 	for _, tz := range timezones {
 		// Loads the timezone location from the IANA Time Zone database.
-		loc, err := time.LoadLocation(tz.location)
+		loc, err := time.LoadLocation(tz.Location)
 		if err != nil {
-			log.Fatalf("Failed to load location for %s: %v", tz.name, err)
+			continue // Skip invalid ones from config
 		}
 		// Stores the loaded location in the locations map with the timezone name as the key.
-		locations[tz.name] = loc
+		locations[tz.Name] = loc
 	}
 
 	// Set the layout function that will be called to draw the UI.
@@ -78,6 +156,9 @@ func main() {
 	if err := KeyBindings(g); err != nil {
 		log.Panicln("Failed to create keybindings: ", err)
 	}
+
+	// Start the stats worker to update CPU and memory usage.
+	startStatsWorker()
 
 	// Update the UI every second to reflect the current time.
 	go func() {
@@ -89,11 +170,7 @@ func main() {
 		}
 	}()
 
-	// Start the stats worker to update CPU and memory usage.
-	startStatsWorker()
-
-	// Start the main event loop for the GUI. This loop listens for user
-	// input and updates the UI accordingly.
+	// Start the main event loop for the GUI.
 	if err := g.MainLoop(); err != nil && err != gocui.ErrQuit {
 		log.Panicln(err)
 	}
@@ -112,28 +189,31 @@ func main() {
 func layout(g *gocui.Gui) error {
 	// Retrieves the current width (maxX) and height (maxY) of your terminal window.
 	maxX, maxY := g.Size()
-	// Reserves the bottom two lines of the terminal so the "Help Footer" doesn't overlap with the clocks.
-	gridMaxY := maxY - 2
-	// Divides the available height into three equal horizontal sections: one for the top clock and two for the bottom grid rows.
+	// Reserves the bottom lines of the terminal so the "Help Footer" doesn't overlap.
+	gridMaxY := maxY - 3
+	// Divides the available height into horizontal sections.
 	rowHeight := gridMaxY / 3
 
 	// Top View (Index 0)
-	// The top section is reserved for the primary timezone (UTC). It spans the entire width of the terminal and occupies the first third of the height.
 	if v, err := g.SetView("top", 0, 0, maxX-1, rowHeight-1); err != nil && err != gocui.ErrUnknownView {
 		return err
 	} else {
-		// Gets the current time for the primary timezone (UTC) and sets the title of the top view
-		// to include the timezone name, a day/night icon, and the business hours indicator.
-		now := time.Now().In(locations[timezones[0].name])
-		// The title format is: " UTC 🌞 🟢" (for example), where the icon and business hours indicator change based on the current time.
-		icon := getDayNightIcon(now)
-		// The business hours indicator is determined by the getBusinessHoursIndicator function,
-		// which checks if the current time falls within standard working hours.
-		biz := getBusinessHoursIndicator(now)
-		// Sets the title of the top view to display the timezone name, day/night icon, and business hours indicator.
-		v.Title = fmt.Sprintf(" %s %s %s", timezones[0].name, icon, biz)
-		// Updates the content of the top view to display the current time and date in the primary timezone.
-		UpdateViewTime(v, locations[timezones[0].name])
+		// Gets the current time for the primary timezone and sets the title.
+		loc, ok := locations[timezones[0].Name]
+		if ok {
+			// Gets the current time for the primary timezone (UTC) and sets the title of the top view
+			// to include the timezone name, a day/night icon, and the business hours indicator.
+			now := time.Now().In(locations[timezones[0].Name])
+			// The title format is: " UTC 🌞 🟢" (for example), where the icon and business hours indicator change based on the current time.
+			icon := getDayNightIcon(now)
+			// The business hours indicator is determined by the getBusinessHoursIndicator function,
+			// which checks if the current time falls within standard working hours.
+			biz := getBusinessHoursIndicator(now)
+			// Sets the title of the top view to display the timezone name, day/night icon, and business hours indicator.
+			v.Title = fmt.Sprintf(" %s %s %s", timezones[0].Name, icon, biz)
+			// Updates the content of the top view to display the current time and date in the primary timezone.
+			UpdateViewTime(v, loc)
+		}
 	}
 
 	// Bottom Grid (Indices 1-6)
@@ -174,11 +254,14 @@ func layout(g *gocui.Gui) error {
 		if v, err := g.SetView(viewName, x0, y0, x1, y1); err != nil && err != gocui.ErrUnknownView {
 			return err
 		} else {
-			now := time.Now().In(locations[timezones[i].name])
-			// The title is formatted to include the timezone name, the current time, and an indicator for day/night and business hours.
-			v.Title = fmt.Sprintf(" [%d] %s %s %s", i, timezones[i].name, getDayNightIcon(now), getBusinessHoursIndicator(now))
-			// Updates the content of the view to display the current time and date for the respective timezone.
-			UpdateViewTime(v, locations[timezones[i].name])
+			loc, ok := locations[timezones[i].Name]
+			if ok {
+				now := time.Now().In(loc)
+				// The title is formatted to include the timezone name, the current time, and an indicator for day/night and business hours.
+				v.Title = fmt.Sprintf(" [%d] %s %s %s", i, timezones[i].Name, getDayNightIcon(now), getBusinessHoursIndicator(now))
+				// Updates the content of the view to display the current time and date for the respective timezone.
+				UpdateViewTime(v, loc)
+			}
 		}
 	}
 
@@ -190,6 +273,7 @@ func layout(g *gocui.Gui) error {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
+		// Sets the frame and colors for the help footer view.
 		v.Frame = false
 		v.FgColor = gocui.ColorCyan
 		v.BgColor = gocui.ColorDefault
@@ -199,13 +283,17 @@ func layout(g *gocui.Gui) error {
 		v.Clear()
 		v.SetCursor(0, 0)
 
-		// Get the current time for the heartbeat
+		// Get the current time for the heartbeat display in the footer.
 		heartbeat := time.Now().Format("15:04:05")
-		//memStats := getSystemStats()
-		//cpuStats := getCPUStats()
-		// The help text includes instructions for swapping timezones (Keys [1-6]) and quitting the application (Ctrl+C).
-		// Display the cached global strings
-		footerText := fmt.Sprintf(" %s | %s | %s | Updated: %s ❤️", currentCPU, currentMEM, "Keys [1-6]: Swap", heartbeat)
+		statusPart := fmt.Sprintf("%s | %s", currentCPU, currentMEM)
+
+		// If there is a notification, it is displayed in yellow and bold.
+		if notification != "" {
+			statusPart = fmt.Sprintf("\x1b[33m\x1b[1m %s \x1b[0m", notification)
+		}
+
+		// The footer text includes instructions for swapping timezones, quitting the application, and displays the current CPU and memory usage along with a heartbeat timestamp.
+		footerText := fmt.Sprintf("Keys [1-6] to swap timezones | Ctrl+C to quit | %s %s", statusPart, heartbeat)
 
 		// Use Fprint instead of Fprintln to avoid an extra newline
 		// that might trigger a scroll-down in a 1-line view.
@@ -277,6 +365,9 @@ func UpdateViewTime(v *gocui.View, loc *time.Location) {
 /**
  * This function determines if a specific timezone is currently within standard
  * working hours (9:00 AM to 5:00 PM, Monday through Friday) and returns a visual status indicator.
+ *
+ * @param {time.Time} now - The current time in the timezone to check.
+ * @return {string} - A visual indicator (🟢 for business hours, ⚫ for non-business hours).
  */
 func getBusinessHoursIndicator(now time.Time) string {
 	// Retrieves the current hour in a 24-hour format (0–23).
@@ -294,11 +385,12 @@ func getBusinessHoursIndicator(now time.Time) string {
 }
 
 /**
- * This function calculates the percentage of the day that has passed and displays a progress bar.
- * The progress bar is color-coded to indicate different times of the day.
- * @param now - The current time.
- * @param width - The width of the progress bar.
- * @returns The progress bar as a string.
+ * This function determines if a specific timezone is currently within standard
+ * working hours (9:00 AM to 5:00 PM, Monday through Friday) and returns a visual status indicator.
+ *
+ * @param {time.Time} now - The current time in the timezone to check.
+ * @param {int} width - The width of the terminal window. This is used to calculate the size of the progress bar.
+ * @return {string} - A visual indicator (🟢 for business hours, ⚫ for non-business hours).
  */
 func getDayProgressBar(now time.Time, width int) string {
 	// 1. Calculate elapsed and remaining time
@@ -308,11 +400,9 @@ func getDayProgressBar(now time.Time, width int) string {
 	totalSeconds := 86400.0
 	percent := secondsElapsed / totalSeconds
 
-	// Calculate remaining time
+	// Calculate remaining time in hours and minutes for the time remaining display.
 	remainingSecs := int(totalSeconds - secondsElapsed)
-	remHours := remainingSecs / 3600
-	remMins := (remainingSecs % 3600) / 60
-	timeRemaining := fmt.Sprintf(" %dh %dm left", remHours, remMins)
+	timeRemaining := fmt.Sprintf(" %dh %dm left", remainingSecs/3600, (remainingSecs%3600)/60)
 
 	// 2. Adjust bar width to make room for the text
 	// We subtract the length of the countdown string from the available width
@@ -337,7 +427,7 @@ func getDayProgressBar(now time.Time, width int) string {
 		color = "\x1b[31m"
 	}
 
-	// 4. Construct the Final String
+	// 4. Construct the final string.
 	bar := "[" + strings.Repeat("█", fillWidth) + strings.Repeat(" ", barWidth-fillWidth) + "]"
 	return color + bar + timeRemaining + "\x1b[0m"
 }
@@ -355,69 +445,18 @@ func getDayNightIcon(now time.Time) string {
 }
 
 /**
- * This function retrieves system memory statistics and formats them into a string.
- * It calculates the allocated memory, total system memory, and the percentage of memory used.
- * The result is formatted with color coding based on the usage percentage.
- * @returns A formatted string containing memory statistics with color coding.
+ * This function displays a notification message for 3 seconds.
+ * @param msg - The message to display.
  */
-func getSystemStats() string {
-	// Retrieves memory statistics from the runtime package,
-	// which provides information about the memory usage of the Go program.
-	var m runtime.MemStats
-	// The ReadMemStats function populates the MemStats struct with the current memory usage data.
-	runtime.ReadMemStats(&m)
-
-	// Convert to Megabytes
-	// The allocated memory is divided by 1024 twice to convert it from bytes to megabytes.
-	// The total system memory is also converted from bytes to megabytes.
-	allocMB := m.Alloc / 1024 / 1024
-	totalMB := m.Sys / 1024 / 1024
-	// The usage percentage is calculated by dividing the allocated memory by the
-	// total system memory and multiplying by 100.
-	usagePercent := float64(m.Alloc) / float64(m.Sys) * 100
-
-	// Color coding based on usage percentage
-	// The color is initially set to green, which is the default color for low memory usage.
-	color := "\x1b[32m"
-	// If the usage percentage is greater than 50%, the color is set to yellow.
-	if usagePercent > 50 {
-		color = "\x1b[33m"
+func showNotification(msg string) {
+	notification = msg
+	if notificationTimer != nil {
+		notificationTimer.Stop()
 	}
-	// If the usage percentage is greater than 80%, the color is set to red.
-	if usagePercent > 80 {
-		color = "\x1b[31m"
-	}
-
-	return fmt.Sprintf("MEM: %s%dMB/%dMB (%.1f%%)\x1b[0m", color, allocMB, totalMB, usagePercent)
-}
-
-/**
- * This function retrieves the CPU usage percentage and formats it into a string with color coding.
- * @returns A formatted string containing the CPU usage percentage with color coding.
- */
-func getCPUStats() string {
-	// Get CPU percent over a 0-second interval (last known value)
-	percentages, err := cpu.Percent(0, false)
-	// If there's an error retrieving CPU stats or if the returned slice is empty,
-	// it returns a default string indicating that the CPU usage is unavailable.
-	if err != nil || len(percentages) == 0 {
-		return "CPU: --%"
-	}
-
-	// Color coding based on usage percentage
-	usage := percentages[0]
-	// The color is initially set to green, which is the default color for low CPU usage.
-	color := "\x1b[32m"
-	// If the usage percentage is greater than 50%, the color is set to yellow.
-	if usage > 50 {
-		color = "\x1b[33m"
-	}
-	// If the usage percentage is greater than 80%, the color is set to red.
-	if usage > 80 {
-		color = "\x1b[31m"
-	}
-
-	return fmt.Sprintf("CPU: %s%.1f%%\x1b[0m", color, usage)
+	// Set a timer to clear the notification after 3 seconds.
+	notificationTimer = time.AfterFunc(3*time.Second, func() {
+		notification = ""
+	})
 }
 
 /**
@@ -425,31 +464,43 @@ func getCPUStats() string {
  * The worker runs every 2 seconds and updates the global variables `currentCPU` and `currentMEM` with the latest statistics.
  */
 func startStatsWorker() {
+	// Start a goroutine to update CPU and memory usage every 2 seconds
 	go func() {
+		// Initialize CPU usage to avoid showing "0.0%" on the first run
+		currentCPU = "CPU: Calculating..."
+		currentMEM = "MEM: Calculating..."
 		ticker := time.NewTicker(2 * time.Second)
 		for range ticker.C {
-			// Update CPU
 			percentages, _ := cpu.Percent(0, false)
 			if len(percentages) > 0 {
 				usage := percentages[0]
+				// Set the color to green by default.
 				color := "\x1b[32m"
+				// If CPU usage exceeds 50%, change the color to yellow to indicate moderate usage.
 				if usage > 50 {
 					color = "\x1b[33m"
 				}
+				// If CPU usage exceeds 80%, change the color to red to indicate high usage.
 				if usage > 80 {
 					color = "\x1b[31m"
 				}
 				currentCPU = fmt.Sprintf("CPU: %s%.1f%%\x1b[0m", color, usage)
 			}
 
-			// Update Memory
+			// Update memory usage
 			var m runtime.MemStats
+			// Reads the current memory statistics into the MemStats struct.
 			runtime.ReadMemStats(&m)
+			// Calculates the percentage of memory used by dividing the allocated
+			// memory (Alloc) by the total system memory (Sys) and multiplying by 100.
 			usagePercent := float64(m.Alloc) / float64(m.Sys) * 100
+			// Set the color to green by default.
 			color := "\x1b[32m"
+			// If memory usage exceeds 50%, change the color to yellow to indicate moderate usage.
 			if usagePercent > 50 {
 				color = "\x1b[33m"
 			}
+			// If memory usage exceeds 80%, change the color to red to indicate high usage.
 			currentMEM = fmt.Sprintf("MEM: %s%dMB\x1b[0m", color, m.Alloc/1024/1024)
 		}
 	}()
@@ -486,7 +537,8 @@ func CenterTime(s string, width int) string {
 func CenterDate(s string, width int) string {
 	// This function is similar to CenterTime but includes a step to remove
 	// ANSI escape codes (like bold formatting) from the string before calculating its width.
-	clean := strings.NewReplacer("\x1b[1m", "", "\x1b[0m", "").Replace(s)
+	repl := strings.NewReplacer("\x1b[1m", "", "\x1b[0m", "", "\x1b[33m", "", "\x1b[32m", "", "\x1b[31m", "")
+	clean := repl.Replace(s)
 	// The runewidth.StringWidth function is used to calculate the display width of the string,
 	// accounting for any wide characters (like emojis) that may take up more than one column in the terminal.
 	pad := (width - runewidth.StringWidth(clean)) / 2
@@ -512,7 +564,13 @@ func KeyBindings(g *gocui.Gui) error {
 		idx := i
 		// Binds the key combination of the number key (1-6) to a function that swaps the primary timezone with the selected timezone.
 		g.SetKeybinding("", rune('0'+i), gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+			if idx >= len(timezones) {
+				return nil
+			}
+			oldTop := timezones[0].Name
 			timezones[0], timezones[idx] = timezones[idx], timezones[0]
+			// After swapping, it updates the locations map to reflect the new primary timezone.
+			showNotification(fmt.Sprintf("Swapped %s with %s", oldTop, timezones[0].Name))
 			return nil
 		})
 	}
@@ -545,4 +603,87 @@ func PrintTimeASCII(t string) []string {
 		}
 	}
 	return lines
+}
+
+/**
+ * Retrieves the path to the configuration file in the user's home directory.
+ *
+ * @returns The full path to the configuration file.
+ */
+func getConfigPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".kairos_config.json")
+}
+
+/**
+ * Saves the current timezones configuration to a JSON file in the user's home directory.
+ */
+func saveConfig() {
+	data, _ := json.Marshal(timezones)
+	os.WriteFile(getConfigPath(), data, 0644)
+}
+
+/**
+ * Loads the timezones configuration from a JSON file in the user's home directory.
+ */
+func loadConfig() {
+	// Attempts to read the configuration file from the user's home directory.
+	data, err := os.ReadFile(getConfigPath())
+	if err == nil {
+		// If the file is successfully read, it unmarshals the JSON data into the timezones slice.
+		json.Unmarshal(data, &timezones)
+	}
+}
+
+/**
+ * This function prints the command-line usage instructions for the Kairos application.
+ * It guides users on how to add, remove, and launch the timezone dashboard.
+ */
+func printHelp() {
+	fmt.Println("\n\x1b[36m\x1b[1mKAIROS - World Clock Dashboard\x1b[0m")
+	fmt.Println("A terminal-based timezone monitor and system health dashboard.")
+	fmt.Println("\n\x1b[1mUSAGE:\x1b[0m")
+	fmt.Println("  kairos              \x1b[90m# Launches the dashboard\x1b[0m")
+	fmt.Println("  kairos help         \x1b[90m# Shows this help menu\x1b[0m")
+	fmt.Println("  kairos list         \x1b[90m# Lists all saved timezones\x1b[0m")
+	fmt.Println("  kairos add [N] [L]  \x1b[90m# Adds a new timezone\x1b[0m")
+	fmt.Println("  kairos remove [N]   \x1b[90m# Removes a timezone\x1b[0m")
+
+	fmt.Println("\n\x1b[1mADD ARGUMENTS:\x1b[0m")
+	fmt.Println("  \x1b[33m[N]\x1b[0m : Display Name (e.g., \"Manila\", \"NYC\")")
+	fmt.Println("  \x1b[33m[L]\x1b[0m : IANA Location (e.g., \"Asia/Manila\", \"America/New_York\")")
+
+	fmt.Println("\n\x1b[1mEXAMPLES:\x1b[0m")
+	fmt.Println("  kairos add \"Tokyo\" \"Asia/Tokyo\"")
+	fmt.Println("  kairos remove \"Tokyo\"")
+
+	fmt.Println("\n\x1b[1mCONTROLS (Inside Dashboard):\x1b[0m")
+	fmt.Println("  • \x1b[32mKeys 1-6\x1b[0m : Swap secondary timezone with the primary (top) view.")
+	fmt.Println("  • \x1b[31mCtrl+C\x1b[0m   : Quit the application.")
+	fmt.Println()
+}
+
+/**
+ * This function displays a list of all currently configured timezones in a table format.
+ * It helps users verify their settings before launching the dashboard.
+ */
+func printList() {
+	if len(timezones) == 0 {
+		fmt.Println("\x1b[31mNo timezones configured.\x1b[0m Use 'kairos help' to see how to add some.")
+		return
+	}
+
+	fmt.Println("\n\x1b[36m\x1b[1mCONFIGURED TIMEZONES\x1b[0m")
+	fmt.Printf("%-5s %-15s %-25s\n", "ID", "NAME", "IANA LOCATION")
+	fmt.Println(strings.Repeat("-", 45))
+
+	for i, tz := range timezones {
+		label := fmt.Sprintf(" %d", i)
+		// Mark the Primary/Top timezone with a green [P] label for easy identification.
+		if i == 0 {
+			label = "\x1b[32m[P]  \x1b[0m"
+		}
+		fmt.Printf("%-5s %-15s %-25s\n", label, tz.Name, tz.Location)
+	}
+	fmt.Println("\x1b[90m(P) = Primary Timezone (Top View)\x1b[0m")
 }
